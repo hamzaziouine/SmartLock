@@ -21,10 +21,12 @@ constexpr uint8_t BUZZ_ON  = LOW;
 constexpr int SERVO_LOCKED = 0;
 constexpr int SERVO_OPEN   = 90;
 
-constexpr unsigned long OPEN_MS      = 3000;
-constexpr unsigned long OPEN_BEEP_MS = 300;   // single 300 ms beep on approval
-constexpr unsigned long ALARM_MS     = 1000;  // 5 beeps total
-constexpr unsigned long BEEP_PULSE   = 100;   // 100 ms on / 100 ms off
+constexpr unsigned long OPEN_MS         = 3000;
+constexpr unsigned long OPEN_BEEP_MS    = 300;   // single 300 ms beep on approval
+constexpr unsigned long ALARM_MS        = 1000;  // 5 beeps total
+constexpr unsigned long BEEP_PULSE      = 100;   // 100 ms on / 100 ms off
+constexpr unsigned long SERVO_SETTLE_MS = 700;   // detach after this to stop holding-current draw
+constexpr unsigned long RC_CHECK_MS     = 500;   // health-check the RC522 every 500 ms
 
 MFRC522 rfid(SS_PIN, RST_PIN);
 Servo doorServo;
@@ -34,22 +36,59 @@ DoorState state = LOCKED;
 unsigned long stateEnteredAt = 0;
 String serialBuf = "";
 
+bool servoAttached = false;
+unsigned long servoActivatedAt = 0;
+unsigned long lastRcCheck = 0;
+
+void rcInit() {
+  rfid.PCD_Init();
+  rfid.PCD_AntennaOff();
+  rfid.PCD_AntennaOn();
+  rfid.PCD_SetAntennaGain(rfid.RxGain_max);
+}
+
+void rcHealthCheck() {
+  if (millis() - lastRcCheck < RC_CHECK_MS) return;
+  lastRcCheck = millis();
+  byte v = rfid.PCD_ReadRegister(MFRC522::VersionReg);
+  if (v == 0x00 || v == 0xFF) {
+    Serial.println(F("RC522:RESET"));
+    rcInit();
+  }
+}
+
+void servoMove(int angle) {
+  if (!servoAttached) {
+    doorServo.attach(SERVO_PIN);
+    servoAttached = true;
+  }
+  doorServo.write(angle);
+  servoActivatedAt = millis();
+}
+
+void servoMaintain() {
+  if (servoAttached && millis() - servoActivatedAt >= SERVO_SETTLE_MS) {
+    doorServo.detach();
+    servoAttached = false;
+  }
+}
+
 void enterState(DoorState s) {
   state = s;
   stateEnteredAt = millis();
   switch (s) {
     case LOCKED:
-      doorServo.write(SERVO_LOCKED);
+      servoMove(SERVO_LOCKED);
       digitalWrite(BUZZER_PIN, BUZZ_OFF);
       Serial.println(F("STATE:LOCKED"));
       break;
     case OPEN_HOLD:
-      doorServo.write(SERVO_OPEN);
+      servoMove(SERVO_OPEN);
       digitalWrite(BUZZER_PIN, BUZZ_ON);   // single 300 ms approval beep, cut off in loop()
       Serial.println(F("STATE:OPEN"));
       break;
     case ALARMING:
-      doorServo.write(SERVO_LOCKED);
+      servoMove(SERVO_LOCKED);
       digitalWrite(BUZZER_PIN, BUZZ_ON);
       Serial.println(F("STATE:ALARM"));
       break;
@@ -81,16 +120,24 @@ void setup() {
 
   Serial.begin(9600);
   SPI.begin();
-  rfid.PCD_Init();
+  rcInit();
 
-  doorServo.attach(SERVO_PIN);
-  doorServo.write(SERVO_LOCKED);
+  servoMove(SERVO_LOCKED);
+
+  // Diagnostic: read the RC522 chip version. 0x91/0x92 = v1.0/v2.0,
+  // 0x88 = clone. 0x00 or 0xFF = SPI dead (wiring or power).
+  byte rcVer = rfid.PCD_ReadRegister(MFRC522::VersionReg);
+  Serial.print(F("RC522:0x"));
+  if (rcVer < 0x10) Serial.print(F("0"));
+  Serial.println(rcVer, HEX);
 
   Serial.println(F("READY"));
 }
 
 void loop() {
   unsigned long now = millis();
+  servoMaintain();
+  rcHealthCheck();
 
   if (state == OPEN_HOLD) {
     unsigned long elapsed = now - stateEnteredAt;
