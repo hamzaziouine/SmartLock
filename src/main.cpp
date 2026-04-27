@@ -21,9 +21,10 @@ constexpr uint8_t BUZZ_ON  = LOW;
 constexpr int SERVO_LOCKED = 0;
 constexpr int SERVO_OPEN   = 90;
 
-constexpr unsigned long OPEN_MS    = 3000;
-constexpr unsigned long ALARM_MS   = 1000;  // 5 beeps total
-constexpr unsigned long BEEP_PULSE = 100;   // 100 ms on / 100 ms off
+constexpr unsigned long OPEN_MS      = 3000;
+constexpr unsigned long OPEN_BEEP_MS = 300;   // single 300 ms beep on approval
+constexpr unsigned long ALARM_MS     = 1000;  // 5 beeps total
+constexpr unsigned long BEEP_PULSE   = 100;   // 100 ms on / 100 ms off
 
 MFRC522 rfid(SS_PIN, RST_PIN);
 Servo doorServo;
@@ -43,8 +44,8 @@ void enterState(DoorState s) {
       Serial.println(F("STATE:LOCKED"));
       break;
     case OPEN_HOLD:
-      digitalWrite(BUZZER_PIN, BUZZ_OFF);
       doorServo.write(SERVO_OPEN);
+      digitalWrite(BUZZER_PIN, BUZZ_ON);   // single 300 ms approval beep, cut off in loop()
       Serial.println(F("STATE:OPEN"));
       break;
     case ALARMING:
@@ -91,8 +92,10 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
-  if (state == OPEN_HOLD && now - stateEnteredAt >= OPEN_MS) {
-    enterState(LOCKED);
+  if (state == OPEN_HOLD) {
+    unsigned long elapsed = now - stateEnteredAt;
+    if (elapsed >= OPEN_BEEP_MS) digitalWrite(BUZZER_PIN, BUZZ_OFF);
+    if (elapsed >= OPEN_MS) enterState(LOCKED);
   }
 
   if (state == ALARMING) {
