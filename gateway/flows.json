@@ -1,0 +1,37 @@
+[
+    {"id":"smartlock-tab","type":"tab","label":"SmartLock","disabled":false,"info":""},
+    {"id":"mqtt-broker","type":"mqtt-broker","name":"localhost","broker":"localhost","port":"1883","clientid":"node-red-smartlock","autoConnect":true,"usetls":false,"protocolVersion":"4","keepalive":"60","cleansession":true},
+    {"id":"ui-tab","type":"ui_tab","name":"SmartLock","icon":"lock","order":1,"disabled":false,"hidden":false},
+    {"id":"ui-group-status","type":"ui_group","name":"Door","tab":"ui-tab","order":1,"disp":true,"width":"6","collapse":false},
+    {"id":"ui-group-log","type":"ui_group","name":"Access Log","tab":"ui-tab","order":2,"disp":true,"width":"6","collapse":false},
+    {"id":"ui-group-manual","type":"ui_group","name":"Manual control","tab":"ui-tab","order":3,"disp":true,"width":"6","collapse":false},
+    {"id":"ui-group-wl","type":"ui_group","name":"Whitelist","tab":"ui-tab","order":4,"disp":true,"width":"6","collapse":false},
+
+    {"id":"mqtt-in-tlm","type":"mqtt in","z":"smartlock-tab","name":"telemetry","topic":"GUID/telemetry","qos":"0","datatype":"json","broker":"mqtt-broker","x":110,"y":80,"wires":[["fn-route"]]},
+    {"id":"fn-route","type":"function","z":"smartlock-tab","name":"route","func":"if (msg.payload.type === 'uid')   return [msg, null, null];\nif (msg.payload.type === 'state') return [null, msg, null];\nif (msg.payload.type === 'ready') return [null, null, msg];\nreturn null;","outputs":3,"x":270,"y":80,"wires":[["fn-check"],["state-text","state-led"],["ready-debug"]]},
+
+    {"id":"fn-check","type":"function","z":"smartlock-tab","name":"whitelist check","func":"const wl = flow.get('whitelist') || ['4C8A285D'];\nconst uid = (msg.payload.uid || '').toUpperCase();\nconst authorized = wl.includes(uid);\nconst now = new Date().toLocaleTimeString();\nconst entry = `${now}  ${uid}  ${authorized ? 'OK  -> open' : 'DENY -> alarm'}`;\nflow.set('lastEntry', entry);\nreturn [\n    { topic: 'GUID/commands', payload: authorized ? 'open' : 'alarm' },\n    { payload: entry }\n];","outputs":2,"x":470,"y":80,"wires":[["mqtt-out-cmd","log-debug"],["log-text"]]},
+
+    {"id":"mqtt-out-cmd","type":"mqtt out","z":"smartlock-tab","name":"command","topic":"GUID/commands","qos":"0","retain":"false","broker":"mqtt-broker","x":700,"y":60,"wires":[]},
+    {"id":"log-debug","type":"debug","z":"smartlock-tab","name":"cmd","active":true,"console":false,"complete":"payload","x":680,"y":120,"wires":[]},
+
+    {"id":"log-text","type":"ui_text","z":"smartlock-tab","group":"ui-group-log","order":1,"width":"6","height":"2","name":"last access","label":"Last access","format":"{{msg.payload}}","layout":"col-center","x":690,"y":180,"wires":[]},
+
+    {"id":"state-text","type":"ui_text","z":"smartlock-tab","group":"ui-group-status","order":1,"width":"6","height":"1","name":"state","label":"Door state","format":"{{msg.payload.state}}","layout":"col-center","x":480,"y":160,"wires":[]},
+    {"id":"state-led","type":"ui_template","z":"smartlock-tab","group":"ui-group-status","order":2,"width":"6","height":"2","name":"led","format":"<div style=\"text-align:center;font-size:42px;font-weight:700;color:{{msg.payload.state === 'OPEN' ? '#2ecc71' : msg.payload.state === 'ALARM' ? '#e74c3c' : '#95a5a6'}}\">{{msg.payload.state}}</div>","storeOutMessages":true,"fwdInMessages":true,"resendOnRefresh":true,"templateScope":"local","x":480,"y":220,"wires":[[]]},
+
+    {"id":"ui-open","type":"ui_button","z":"smartlock-tab","name":"open","group":"ui-group-manual","order":1,"width":"2","height":"1","passthru":false,"label":"Open","tooltip":"","color":"","bgcolor":"#2ecc71","icon":"","payload":"open","payloadType":"str","topic":"GUID/commands","x":110,"y":280,"wires":[["mqtt-out-cmd"]]},
+    {"id":"ui-lock","type":"ui_button","z":"smartlock-tab","name":"lock","group":"ui-group-manual","order":2,"width":"2","height":"1","passthru":false,"label":"Lock","tooltip":"","color":"","bgcolor":"#95a5a6","icon":"","payload":"lock","payloadType":"str","topic":"GUID/commands","x":110,"y":320,"wires":[["mqtt-out-cmd"]]},
+    {"id":"ui-alarm","type":"ui_button","z":"smartlock-tab","name":"alarm","group":"ui-group-manual","order":3,"width":"2","height":"1","passthru":false,"label":"Alarm","tooltip":"","color":"","bgcolor":"#e74c3c","icon":"","payload":"alarm","payloadType":"str","topic":"GUID/commands","x":110,"y":360,"wires":[["mqtt-out-cmd"]]},
+
+    {"id":"ui-wl-input","type":"ui_text_input","z":"smartlock-tab","name":"wl-input","label":"UID (hex)","tooltip":"","group":"ui-group-wl","order":1,"width":"4","height":"1","passthru":true,"mode":"text","delay":"0","topic":"uid","sendOnBlur":true,"x":110,"y":420,"wires":[["wl-buffer"]]},
+    {"id":"wl-buffer","type":"function","z":"smartlock-tab","name":"buffer","func":"context.set('uid', msg.payload);\nreturn null;","outputs":1,"x":260,"y":420,"wires":[[]]},
+    {"id":"ui-wl-add","type":"ui_button","z":"smartlock-tab","name":"add","group":"ui-group-wl","order":2,"width":"2","height":"1","passthru":false,"label":"Add","tooltip":"","color":"","bgcolor":"#3498db","icon":"","payload":"add","payloadType":"str","topic":"","x":110,"y":460,"wires":[["wl-mutate"]]},
+    {"id":"ui-wl-rm","type":"ui_button","z":"smartlock-tab","name":"remove","group":"ui-group-wl","order":3,"width":"2","height":"1","passthru":false,"label":"Remove","tooltip":"","color":"","bgcolor":"#e67e22","icon":"","payload":"remove","payloadType":"str","topic":"","x":110,"y":500,"wires":[["wl-mutate"]]},
+    {"id":"wl-mutate","type":"function","z":"smartlock-tab","name":"mutate","func":"const uid = ((flow.get('wl_input_uid') || '') + '').toUpperCase().trim();\nlet wl = flow.get('whitelist') || ['4C8A285D'];\nif (!uid) { msg.payload = wl.join(', ') || '(empty)'; return msg; }\nif (msg.payload === 'add' && !wl.includes(uid)) wl.push(uid);\nif (msg.payload === 'remove') wl = wl.filter(x => x !== uid);\nflow.set('whitelist', wl);\nmsg.payload = wl.join(', ') || '(empty)';\nreturn msg;","outputs":1,"x":280,"y":480,"wires":[["wl-display"]]},
+    {"id":"wl-display","type":"ui_text","z":"smartlock-tab","group":"ui-group-wl","order":4,"width":"6","height":"2","name":"wl-display","label":"Whitelist","format":"{{msg.payload}}","layout":"col-center","x":480,"y":480,"wires":[]},
+
+    {"id":"wl-input-capture","type":"function","z":"smartlock-tab","name":"capture","func":"flow.set('wl_input_uid', msg.payload);\nreturn null;","outputs":1,"x":260,"y":380,"wires":[[]]},
+
+    {"id":"ready-debug","type":"debug","z":"smartlock-tab","name":"ready","active":true,"console":false,"complete":"payload","x":480,"y":40,"wires":[]}
+]
