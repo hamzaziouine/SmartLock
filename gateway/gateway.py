@@ -42,6 +42,25 @@ def on_connect(client, _userdata, _flags, rc):
     client.subscribe(TOPIC_CMD, qos=0)
 
 
+def reopen_serial():
+    global ser
+    try:
+        ser.close()
+    except Exception:
+        pass
+    time.sleep(1)
+    for attempt in range(5):
+        try:
+            ser = serial.Serial(SERIAL_PORT, SERIAL_BAUD, timeout=1)
+            time.sleep(2)
+            print(f"[serial] reopened {SERIAL_PORT}")
+            return True
+        except serial.SerialException as exc:
+            print(f"[serial] reopen attempt {attempt+1}/5 failed: {exc}")
+            time.sleep(2)
+    return False
+
+
 def on_command(_client, _userdata, msg):
     cmd = msg.payload.decode("utf-8", errors="ignore").strip()
     if not cmd:
@@ -54,16 +73,24 @@ def on_command(_client, _userdata, msg):
         print(f"[cmd] reject {cmd!r}")
         return
     print(f"[cmd] -> arduino: {cmd}")
-    ser.write((cmd + "\r\n").encode("ascii"))
+    try:
+        ser.write((cmd + "\r\n").encode("ascii"))
+    except (serial.SerialException, OSError) as exc:
+        print(f"[serial] write failed: {exc} — attempting reopen")
+        if reopen_serial():
+            try:
+                ser.write((cmd + "\r\n").encode("ascii"))
+            except Exception as exc2:
+                print(f"[serial] write retry failed: {exc2}")
 
 
 def serial_reader():
     while True:
         try:
             line = ser.readline().decode("ascii", errors="ignore").strip()
-        except serial.SerialException as exc:
-            print(f"[serial] error: {exc}")
-            time.sleep(1)
+        except (serial.SerialException, OSError) as exc:
+            print(f"[serial] read error: {exc} — attempting reopen")
+            reopen_serial()
             continue
         if not line:
             continue
