@@ -6,3 +6,15 @@
 
 # OMC internal state
 .omc/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Node
+node_modules/
+
+# Secrets
+*.env
+.env
